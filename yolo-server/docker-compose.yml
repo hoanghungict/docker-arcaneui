@@ -7,14 +7,10 @@ services:
     ports:
       - "8000:8000"
     restart: unless-stopped
-    
-    # === GPU (nếu máy server có NVIDIA) ===
-    # deploy:
+    volumes:
+      - ./results:/app/results   # lưu video kết quả
+    # deploy:                     # Bỏ comment nếu có GPU
     #   resources:
     #     reservations:
     #       devices:
     #         - capabilities: [gpu]
-    
-    # Mount thư mục models nếu dùng model custom
-    # volumes:
-    #   - ./models:/app/models
