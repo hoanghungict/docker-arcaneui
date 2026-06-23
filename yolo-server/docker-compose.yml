@@ -1,0 +1,20 @@
+version: "3.9"
+
+services:
+  yolo-api:
+    build: .
+    container_name: yolo-server
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+    
+    # === GPU (nếu máy server có NVIDIA) ===
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - capabilities: [gpu]
+    
+    # Mount thư mục models nếu dùng model custom
+    # volumes:
+    #   - ./models:/app/models
