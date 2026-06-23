@@ -1,80 +1,79 @@
-from fastapi import FastAPI, File, UploadFile
-from fastapi.responses import JSONResponse, FileResponse
-from ultralytics import YOLO
+from fastapi import FastAPI, Request
+from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.templating import Jinja2Templates
 import cv2
-import tempfile
-import shutil
-from pathlib import Path
-import uuid
+import mediapipe as mp
+import asyncio
 
-app = FastAPI(title="YOLOv11 Video Server")
+app = FastAPI(title="Finger Count Live")
+templates = Jinja2Templates(directory="templates")
 
-model = YOLO("yolo11s.pt")   # thay bằng best.pt nếu bạn có model custom
+mp_hands = mp.solutions.hands
+mp_draw = mp.solutions.drawing_utils
 
-@app.post("/detect")
-async def detect_image(file: UploadFile = File(...)):
-    # ... (giữ nguyên code detect ảnh cũ của bạn)
-    pass  # bạn có thể giữ lại nếu cần
+hands = mp_hands.Hands(
+    static_image_mode=False,
+    max_num_hands=2,
+    min_detection_confidence=0.7,
+    min_tracking_confidence=0.7
+)
 
-@app.post("/detect_video")
-async def detect_video(file: UploadFile = File(...)):
-    if not file.filename.endswith(('.mp4', '.avi', '.mov', '.mkv')):
-        return JSONResponse({"error": "Chỉ hỗ trợ video mp4, avi, mov, mkv"}, status_code=400)
+def count_fingers(hand_landmarks):
+    landmarks = hand_landmarks.landmark
+    tips = [8, 12, 16, 20]  # Index, Middle, Ring, Pinky
+    count = 0
+    
+    # Ngón cái
+    if landmarks[4].x < landmarks[3].x:
+        count += 1
+    # Các ngón còn lại
+    for tip in tips:
+        if landmarks[tip].y < landmarks[tip - 2].y:
+            count += 1
+    return count
 
-    # Tạo file tạm
-    with tempfile.NamedTemporaryFile(delete=False, suffix=Path(file.filename).suffix) as tmp_in:
-        shutil.copyfileobj(file.file, tmp_in)
-        tmp_in_path = tmp_in.name
-
-    output_path = f"results/{uuid.uuid4()}.mp4"
-    Path("results").mkdir(exist_ok=True)
-
-    cap = cv2.VideoCapture(tmp_in_path)
-    fps = int(cap.get(cv2.CAP_PROP_FPS))
-    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-
-    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
-
-    seen_ids = set()
-    total_person = 0
-
-    print(f"Đang xử lý video: {file.filename}")
-
-    while cap.isOpened():
+def generate_frames():
+    cap = cv2.VideoCapture(0)
+    while True:
         success, frame = cap.read()
         if not success:
             break
 
-        results = model.track(frame, persist=True, conf=0.5, iou=0.45)
+        frame = cv2.flip(frame, 1)
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        results = hands.process(rgb)
 
-        for result in results:
-            if result.boxes.id is not None:
-                for box in result.boxes:
-                    cls_id = int(box.cls)
-                    track_id = int(box.id)
-                    class_name = result.names[cls_id]
+        total = 0
+        if results.multi_hand_landmarks:
+            for hand_lms in results.multi_hand_landmarks:
+                mp_draw.draw_landmarks(frame, hand_lms, mp_hands.HAND_CONNECTIONS)
+                fingers = count_fingers(hand_lms)
+                total += fingers
+                
+                # Hiển thị trên tay
+                h, w, _ = frame.shape
+                x = int(hand_lms.landmark[0].x * w)
+                y = int(hand_lms.landmark[0].y * h)
+                cv2.putText(frame, str(fingers), (x-30, y-30), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 255, 0), 4)
 
-                    x1, y1, x2, y2 = map(int, box.xyxy[0])
-                    cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 3)
-                    cv2.putText(frame, f"{class_name} #{track_id}", (x1, y1-10),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+        cv2.putText(frame, f"Total Fingers: {total}", (20, 80),
+                    cv2.FONT_HERSHEY_SIMPLEX, 2, (0, 0, 255), 5)
 
-                    if class_name == "person" and track_id not in seen_ids:
-                        seen_ids.add(track_id)
-                        total_person += 1
+        ret, buffer = cv2.imencode('.jpg', frame)
+        frame_bytes = buffer.tobytes()
+        yield (b'--frame\r\n'
+               b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
 
-        cv2.putText(frame, f"Persons: {total_person}", (20, 60),
-                    cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 0, 255), 4)
+@app.get("/", response_class=HTMLResponse)
+async def home(request: Request):
+    return templates.TemplateResponse("index.html", {"request": request})
 
-        out.write(frame)
+@app.get("/video_feed")
+async def video_feed():
+    return StreamingResponse(generate_frames(), 
+                           media_type="multipart/x-mixed-replace; boundary=frame")
 
-    cap.release()
-    out.release()
-
-    return FileResponse(
-        output_path,
-        media_type="video/mp4",
-        filename=f"ketqua_{file.filename}"
-    )
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)

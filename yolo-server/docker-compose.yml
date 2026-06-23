@@ -1,16 +1,14 @@
 version: "3.9"
 
 services:
-  yolo-api:
+  finger-count:
     build: .
-    container_name: yolo-server
+    container_name: finger-count-live
     ports:
       - "8000:8000"
     restart: unless-stopped
-    volumes:
-      - ./results:/app/results   # lưu video kết quả
-    # deploy:                     # Bỏ comment nếu có GPU
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - capabilities: [gpu]
+    privileged: true                    # Quan trọng để truy cập camera
+    devices:
+      - /dev/video0:/dev/video0         # Camera
+    environment:
+      - DISPLAY=${DISPLAY}
