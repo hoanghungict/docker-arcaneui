@@ -1,14 +1,15 @@
-FROM python:3.11-slim
+FROM python:3.11
 
 WORKDIR /app
 
-# Cài các package cần thiết cho OpenCV + MediaPipe
+# Cài dependencies hệ thống cần cho MediaPipe + OpenCV
 RUN apt-get update && apt-get install -y \
     libgl1 \
     libglib2.0-0 \
     libsm6 \
     libxext6 \
     libxrender-dev \
+    libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .

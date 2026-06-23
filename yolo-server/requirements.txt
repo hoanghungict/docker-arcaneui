@@ -1,6 +1,5 @@
 fastapi
 uvicorn[standard]
-python-multipart
-opencv-python
-mediapipe
 jinja2
+opencv-python
+mediapipe==0.10.14
